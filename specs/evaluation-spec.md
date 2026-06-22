@@ -160,12 +160,17 @@ TRUE class's bucket, not of the class that was wrongly predicted.
 **Step-by-step logic:**
 
 ```
-[blank — describe the steps your code will take.
- 1. Initialize ...
- 2. Loop over ...
- 3. For each pair (predicted, truth) ...
- 4. After the loop ...
- 5. Return ...]
+1. Initialize a result dict with one entry per label in VALID_LABELS, each
+   {"correct": 0, "total": 0, "accuracy": 0.0}. (Use VALID_LABELS, not the
+   labels seen in the data, so every class always appears even with 0 examples.)
+2. Loop over the (predicted, truth) pairs together with zip.
+3. For each pair: if truth is in the result dict, increment that truth class's
+   "total". If additionally predicted == truth, increment its "correct".
+   (Pairs whose truth isn't a valid label are ignored — shouldn't happen with
+   clean test data, but it keeps the dict keys fixed to VALID_LABELS.)
+4. After the loop, for each label compute "accuracy" = correct / total, or 0.0
+   if total == 0 (see edge case).
+5. Return the dict.
 ```
 
 ---
@@ -173,8 +178,12 @@ TRUE class's bucket, not of the class that was wrongly predicted.
 **Edge case — what if a class has no examples in ground_truth (total == 0)?**
 
 ```
-[blank — what should accuracy be set to? Why?
- Hint: look at the docstring in evaluate.py.]
+Set "accuracy" to 0.0 (matches the docstring in evaluate.py: "0.0 if total
+is 0"). Dividing 0/0 is undefined and would raise ZeroDivisionError, so we
+guard it. Keep "correct": 0 and "total": 0 so the report still shows the class
+with a 0/0 count rather than omitting it. (Note this is a convention, not a
+true measurement — there's nothing to be right or wrong about, but 0.0 is the
+agreed sentinel here.)
 ```
 
 ---
@@ -185,14 +194,23 @@ TRUE class's bucket, not of the class that was wrongly predicted.
 predictions  = ["interview", "interview", "solo", "panel", "panel"]
 ground_truth = ["interview", "solo",      "solo", "panel", "narrative"]
 
-[blank — fill in the per-class results table below]
+Walk the pairs, bucketing by GROUND TRUTH:
+  i=0: truth=interview, pred=interview -> interview: total+1, correct+1
+  i=1: truth=solo,      pred=interview -> solo:      total+1
+  i=2: truth=solo,      pred=solo      -> solo:      total+1, correct+1
+  i=3: truth=panel,     pred=panel     -> panel:     total+1, correct+1
+  i=4: truth=narrative, pred=panel     -> narrative: total+1
 
 label       correct  total  accuracy
 ----------  -------  -----  --------
-interview   [blank]  [blank]  [blank]
-solo        [blank]  [blank]  [blank]
-panel       [blank]  [blank]  [blank]
-narrative   [blank]  [blank]  [blank]
+interview      1       1      1.0
+solo           1       2      0.5
+panel          1       1      1.0
+narrative      0       1      0.0
+
+(Check: totals 1+2+1+1 = 5 = len(ground_truth). Overall accuracy would be
+3/5 = 0.6 — note narrative scores 0.0 even though "panel" was over-predicted;
+the miss is charged to narrative's bucket, not panel's.)
 ```
 
 ---
