@@ -44,8 +44,14 @@ Returns the fraction of predictions that exactly match the ground truth.
 **Formula:**
 
 ```
-[blank — write out the accuracy formula in plain English.
- What counts as "correct"? What do you divide by?]
+accuracy = (number of positions where prediction == ground_truth)
+           / (total number of predictions)
+
+"Correct" = an exact string match between predictions[i] and ground_truth[i]
+at the same index. The two lists are parallel (same length, same order), so we
+compare position by position. We divide by the total count of predictions
+(== len(ground_truth)), NOT by the number of correct ones. A label of
+"unknown" never equals a real ground-truth label, so it simply counts as wrong.
 ```
 
 ---
@@ -53,10 +59,12 @@ Returns the fraction of predictions that exactly match the ground truth.
 **Step-by-step logic:**
 
 ```
-[blank — describe the steps your code will take.
- 1. ...
- 2. ...
- 3. ...]
+1. If predictions is empty (len == 0), return 0.0 immediately to avoid
+   dividing by zero (see edge case below).
+2. Pair up predictions and ground_truth by index (zip).
+3. Count how many pairs have prediction == ground_truth.
+4. Divide that count by len(predictions) to get a float in [0.0, 1.0].
+5. Return the float.
 ```
 
 ---
@@ -64,7 +72,11 @@ Returns the fraction of predictions that exactly match the ground truth.
 **Edge case — what if both lists are empty?**
 
 ```
-[blank — what should the function return? Why?]
+Return 0.0. With no predictions there is nothing correct, and dividing by
+len(predictions) == 0 would raise ZeroDivisionError. 0.0 is a safe, in-range
+sentinel that the report formatter ({accuracy:.1%}) can display without
+crashing. (Assumes the two lists are always equal length, which run_evaluation
+guarantees — they are built from the same results list.)
 ```
 
 ---
@@ -75,7 +87,16 @@ Returns the fraction of predictions that exactly match the ground truth.
 predictions  = ["interview", "solo", "panel", "interview"]
 ground_truth = ["interview", "solo", "solo",  "narrative"]
 
-[blank — what does compute_accuracy() return for these inputs? Show your work.]
+Compare index by index:
+  i=0: interview == interview  -> correct
+  i=1: solo      == solo       -> correct
+  i=2: panel     != solo       -> wrong
+  i=3: interview != narrative  -> wrong
+
+correct = 2, total = 4
+accuracy = 2 / 4 = 0.5
+
+compute_accuracy() returns 0.5
 ```
 
 ---
@@ -113,8 +134,11 @@ A `dict` keyed by label. Each value is a dict with three keys:
 **What does "correct" mean for a given class?**
 
 ```
-[blank — be precise. When does an episode count as correctly classified
- for the "interview" class, for example?]
+An episode counts as correct FOR class C when its ground_truth is C AND the
+prediction also equals C. For the "interview" class: ground_truth[i] ==
+"interview" and predictions[i] == "interview". Because we only count an episode
+under its ground-truth class, "correct for C" is just (truth == C and
+pred == C) — which, given truth == C, is the same as pred == truth.
 ```
 
 ---
@@ -122,7 +146,13 @@ A `dict` keyed by label. Each value is a dict with three keys:
 **What does "total" mean for a given class?**
 
 ```
-[blank — is "total" the total number of predictions, or something more specific?]
+"total" for class C = the number of episodes whose GROUND_TRUTH label is C —
+i.e. how many true C's exist in the test set. It is NOT the number of times C
+was predicted, and NOT the overall number of predictions. This makes per-class
+accuracy = "of the real C episodes, what fraction did we get right?" (recall
+for that class). Consequence: the per-class totals sum to len(ground_truth),
+and predictions that are "unknown" or a wrong class lower the accuracy of the
+TRUE class's bucket, not of the class that was wrongly predicted.
 ```
 
 ---
