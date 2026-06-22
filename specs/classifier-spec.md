@@ -265,29 +265,61 @@ any labels you're unsure about. Annotation quality is part of the lab.
 
 ## Implementation Notes
 
-*Fill this in after implementing and testing both functions.*
+*Captured from a real Groq call (model: llama-3.3-70b-versatile) using the
+implemented build_few_shot_prompt() with all 20 labeled examples. NOTE:
+classify_episode() itself is still a stub at the time of writing, so the parse
+described below is the specced approach run by hand against this real response —
+not yet wired into the function.*
 
 **Test: what does the raw LLM response look like for one episode?**
 
 ```
-Episode tested: [title]
-Raw response text: [paste it here]
+Episode tested: "Dr. Priya Nair on Adolescent Mental Health After the Pandemic"
+  (the interview example from app.py)
+
+Raw response text (verbatim, between the markers):
+---
+Label: interview
+Reasoning: This episode features a conversation between a host and a single
+guest, Dr. Priya Nair, discussing her research and expertise on a specific
+topic, which matches the structure of an interview episode.
+---
+
+The model followed the requested format exactly: "Label:" on its own first
+line, "Reasoning:" on the next line. No markdown, no preamble, no code fences.
 ```
 
 **How did you parse the label out of the response?**
 
 ```
-[describe the string operations — strip, split, lower, etc.]
+Anchor parse (matches Step 3 of the spec):
+  1. Split the text on newlines.
+  2. Find the line that starts with "label:" (after .strip().lower() and
+     stripping any leading markdown like *, `, #). Here: "Label: interview".
+  3. Take everything after the first ":" -> " interview", then .strip().lower()
+     -> "interview".
+  4. Find the line starting with "reasoning:", take the text after the colon
+     (plus any continuation lines) as the reasoning string.
+  5. Check "interview" is in VALID_LABELS -> it is, so keep it.
+
+For THIS response the fallback paths (whole-text scan for a label keyword,
+"unknown" sentinel) were not needed — the primary anchor matched cleanly.
 ```
 
 **Did any episodes return `"unknown"`? If so, why?**
 
 ```
-[yes / no — if yes, what did the raw response look like?]
+No. This single test parsed cleanly to "interview". A full 20-episode run
+(once classify_episode() is implemented) is the real test for whether any
+response goes off-format; this section should be updated after that run.
 ```
 
 **One thing about the output format that surprised you:**
 
 ```
-[your answer here]
+The 70B model held the two-line "Label:/Reasoning:" format precisely on the
+first try with no fences or preamble — the failure mode I most worried about
+when rejecting JSON (markdown wrapping, chatty preamble) didn't appear here.
+That said, one clean sample isn't proof; the anchor-based parse and the
+"unknown" fallback are still worth keeping for the cases where it doesn't.
 ```
