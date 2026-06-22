@@ -91,10 +91,35 @@ the format below:" followed by the output format you chose.
 **What output format should you request from the LLM?**
 
 ```
-[blank — you need to parse the response in classify_episode(). What format
-makes parsing reliable? Think about: a single label on its own line?
-A structured format like "Label: X / Reasoning: Y"? JSON?
-What are the tradeoffs?]
+CHOICE: Two prefixed lines —
+
+    Label: <one of: interview | solo | panel | narrative>
+    Reasoning: <one or two sentences>
+
+Request exactly this shape and instruct the model to put Label first, on its
+own line, and to use one of the four strings verbatim with nothing else on
+that line.
+
+Why this over the alternatives:
+
+- "Label: X / Reasoning: Y" (CHOSEN): parsed by ANCHOR, not position — scan
+  for the line starting with "label:" (case-insensitive, after stripping
+  markdown like ** or #). Resilient to preamble/trailing prose, and degrades
+  gracefully: if the Reasoning line is missing or malformed, the label is
+  still recoverable on its own. Multi-line reasoning is fine because it is the
+  last field. Main weakness — markdown bolding / capitalization drift — is
+  handled by normalizing (strip, lower, strip "*#").
+
+- JSON object: unambiguous WHEN valid, but this model (llama-3.3-70b, no
+  enforced JSON mode) often wraps it in ```json fences, adds a preamble line,
+  or emits invalid JSON (trailing commas, unescaped quotes). It is all-or-
+  nothing: one malformed brace loses BOTH fields. Would need substring
+  extraction plus try/except just to match the robustness we get for free
+  above. Rejected.
+
+- Bare label on line 1, then prose: simplest parse, but most fragile — any
+  preamble ("Sure, here's my classification:") becomes the "label," and there
+  is no anchor to recover from drift. Rejected.
 ```
 
 ---
@@ -102,8 +127,16 @@ What are the tradeoffs?]
 **Edge cases to handle in the prompt:**
 
 ```
-[blank — what if labeled_examples is empty? What if the description is very
-short? How does your prompt handle these?]
+- labeled_examples is empty: still produce a valid prompt. Fall back to a
+  zero-shot prompt — the task instruction plus the four label definitions are
+  enough for the model to classify without examples. Do NOT crash or return ""
+  (an empty prompt would waste an API call and guarantee an "unknown").
+- Very short / thin description: don't special-case it. Still ask for the same
+  output format; the model should pick the best-fit label from the definitions.
+  Low-signal inputs are exactly when the Reasoning field is most useful for
+  debugging, so always request it.
+- Whatever the input, the prompt must always end with the explicit output-format
+  instruction so the response stays parseable.
 ```
 
 ---
@@ -159,9 +192,19 @@ Extract the response text from:
 **Step 3 — Parse the response:**
 
 ```
-[blank — how do you extract the label and reasoning from the LLM's text output?
-What string operations or parsing logic do you need?
-This depends on the output format you chose in build_few_shot_prompt.]
+Matches the chosen "Label: X / Reasoning: Y" format. Parse by anchor:
+
+  1. Split the response text into lines.
+  2. Find the line whose stripped, lowercased, markdown-stripped form starts
+     with "label:". Take the text after the colon as the raw label; normalize
+     it (strip, lower, remove surrounding "*`#" and quotes).
+  3. Find the line starting with "reasoning:"; take the text after the colon.
+     If reasoning spans multiple lines, join the remainder of the response
+     after the Reasoning: line. If no Reasoning line is found, fall back to the
+     full response text (minus the Label line) so reasoning is never empty.
+  4. If NO line starts with "label:", fall back: scan the whole response for
+     the first occurrence of any VALID_LABELS string. If still nothing, the
+     label is unparseable -> handled in Step 4 as "unknown".
 ```
 
 ---
@@ -169,8 +212,12 @@ This depends on the output format you chose in build_few_shot_prompt.]
 **Step 4 — Validate the label:**
 
 ```
-[blank — what do you do if the LLM returns a label that isn't in VALID_LABELS?
-What should label be set to?]
+After normalizing the parsed label (strip + lower), check membership in
+VALID_LABELS. If it is one of the four, keep it. If it is anything else —
+a synonym, a sentence, empty, or unparseable — set label to "unknown".
+Keep the parsed reasoning even when the label is "unknown", since it shows
+why the model went off-format and aids debugging. "unknown" is a valid
+output per the contract; it is counted as a miss in evaluation, not an error.
 ```
 
 ---
@@ -178,9 +225,19 @@ What should label be set to?]
 **Step 5 — Handle errors gracefully:**
 
 ```
-[blank — what could go wrong? (Network error? Unparseable response?)
-What should the function return if something fails?
-Hint: the evaluation loop runs 20 calls — one bad response shouldn't crash everything.]
+Wrap the API call and parsing in try/except so one failure can't crash the
+20-call evaluation loop. Failure modes and responses:
+
+- Network / API error (timeout, rate limit, auth, 5xx): catch the exception,
+  return {"label": "unknown", "reasoning": "API error: <short message>"}.
+- Empty or None response content: treat as unparseable -> label "unknown",
+  reasoning notes the empty response.
+- Unparseable text (no label found, see Step 3 fallback): label "unknown",
+  reasoning = the raw response (truncated) so it can be inspected.
+
+The function ALWAYS returns a dict with "label" and "reasoning" keys and never
+raises. "unknown" is the single sentinel for every non-success path, so the
+caller never has to distinguish error types to keep going.
 ```
 
 ---
