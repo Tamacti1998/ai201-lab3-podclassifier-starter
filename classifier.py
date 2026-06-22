@@ -55,7 +55,54 @@ def build_few_shot_prompt(labeled_examples: list[dict], description: str) -> str
 
     Before writing code, complete specs/classifier-spec.md.
     """
-    return ""
+    instructions = (
+        "You are classifying podcast episodes by their format. Classify the "
+        "episode into exactly one of these four labels:\n\n"
+        "- interview: a conversation between a host and one or more guests\n"
+        "- solo: a single host speaking from memory, experience, or opinion — "
+        "no guests, no assembled external sources\n"
+        "- panel: multiple guests with roughly equal speaking time, often "
+        "debating or discussing a topic together\n"
+        "- narrative: a story assembled from external sources — interviews, "
+        "archival audio, reporting — with a clear narrative arc\n\n"
+        "Classify by the structural format, not the topic or tone. "
+        "Return only the label and your reasoning. Do not explain the taxonomy."
+    )
+
+    # Output format request — parsed by anchor in classify_episode().
+    output_format = (
+        "Respond in exactly this format, with Label on its own line first:\n\n"
+        "Label: <one of: interview, solo, panel, narrative>\n"
+        "Reasoning: <one or two sentences>\n\n"
+        "Use one of the four label strings verbatim, with nothing else on the "
+        "Label line."
+    )
+
+    parts = [instructions]
+
+    # Edge case: no labeled examples -> fall back to a zero-shot prompt.
+    if labeled_examples:
+        parts.append("Here are labeled examples:")
+        example_blocks = []
+        for ex in labeled_examples:
+            example_blocks.append(
+                f"Title: {ex.get('title', '')}\n"
+                f"Description: {ex.get('description', '')}\n"
+                f"Label: {ex['label']}"
+            )
+        parts.append("\n\n---\n\n".join(example_blocks))
+
+    # The new episode to classify — same format, Label withheld.
+    parts.append(
+        "Now classify this episode:\n\n"
+        f"Description: {description}\n"
+        "Label: ?"
+    )
+
+    # Always end with the explicit output-format instruction.
+    parts.append(output_format)
+
+    return "\n\n".join(parts)
 
 
 def classify_episode(description: str, labeled_examples: list[dict]) -> dict:
