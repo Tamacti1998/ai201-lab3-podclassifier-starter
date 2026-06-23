@@ -123,7 +123,70 @@ def classify_episode(description: str, labeled_examples: list[dict]) -> dict:
 
     Before writing code, complete specs/classifier-spec.md.
     """
-    return {
-        "label": None,
-        "reasoning": "Classifier not yet implemented. Complete Milestone 2.",
-    }
+    # Step 1 — build the prompt from the labeled examples + this description.
+    prompt = build_few_shot_prompt(labeled_examples, description)
+
+    # Step 2 — send to the LLM. Step 5 — wrap so one bad call can't crash the
+    # 20-call evaluation loop; any failure returns label "unknown".
+    try:
+        response = _client.chat.completions.create(
+            model=LLM_MODEL,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=250,
+        )
+        text = response.choices[0].message.content or ""
+    except Exception as e:  # network / API / auth / rate-limit errors
+        return {"label": "unknown", "reasoning": f"API error: {e}"}
+
+    # Step 3 — anchor parse on the "Label:" / "Reasoning:" lines.
+    label, reasoning = _parse_response(text)
+
+    # Step 4 — validate against VALID_LABELS; anything else becomes "unknown"
+    # but we keep the reasoning so off-format responses can be inspected.
+    if label not in VALID_LABELS:
+        reasoning = reasoning or text.strip() or "No reasoning returned."
+        label = "unknown"
+
+    return {"label": label, "reasoning": reasoning}
+
+
+def _strip_markdown(s: str) -> str:
+    """Strip leading/trailing markdown noise (*, `, #) and quotes/space."""
+    return s.strip().strip("*`#").strip().strip('"').strip("'").strip()
+
+
+def _parse_response(text: str) -> tuple[str, str]:
+    """
+    Extract (label, reasoning) from the LLM response using anchor parsing.
+
+    Primary: find the line starting with "label:" and the line starting with
+    "reasoning:" (case-insensitive, markdown stripped). Reasoning may span the
+    remaining lines. Fallback: scan the whole text for any valid label keyword.
+    Returns ("", "") for label/reasoning if nothing usable is found.
+    """
+    lines = text.splitlines()
+    label = ""
+    reasoning = ""
+
+    for i, line in enumerate(lines):
+        cleaned = _strip_markdown(line).lower()
+        if not label and cleaned.startswith("label:"):
+            label = _strip_markdown(line.split(":", 1)[1]).lower()
+        elif cleaned.startswith("reasoning:"):
+            # Take the rest of this line plus any continuation lines.
+            first = line.split(":", 1)[1].strip()
+            rest = [l.strip() for l in lines[i + 1:] if l.strip()]
+            reasoning = " ".join([first, *rest]).strip()
+
+    # Fallback: no "Label:" line — scan the whole response for a known label.
+    if not label:
+        lowered = text.lower()
+        for valid in VALID_LABELS:
+            if valid in lowered:
+                label = valid
+                break
+
+    if not reasoning:
+        reasoning = text.strip()
+
+    return label, reasoning
