@@ -38,6 +38,25 @@ def load_labeled_examples() -> list[dict]:
     return labeled
 
 
+def _shorten(text: str, max_chars: int = 200) -> str:
+    """
+    Trim an example description to ~max_chars, cutting at a sentence boundary
+    when possible so the excerpt stays readable. Keeps token cost down without
+    losing the structural cue (which is almost always stated early).
+    """
+    text = text.strip()
+    if len(text) <= max_chars:
+        return text
+    window = text[:max_chars]
+    # Prefer ending at the last sentence break inside the window.
+    cut = max(window.rfind(". "), window.rfind("! "), window.rfind("? "))
+    if cut >= max_chars // 2:
+        return window[:cut + 1]
+    # Otherwise fall back to the last word boundary.
+    space = window.rfind(" ")
+    return (window[:space] if space > 0 else window).rstrip() + "…"
+
+
 def build_few_shot_prompt(labeled_examples: list[dict], description: str) -> str:
     """
     Build a few-shot classification prompt using the student's labeled training examples.
@@ -85,9 +104,12 @@ def build_few_shot_prompt(labeled_examples: list[dict], description: str) -> str
         parts.append("Here are labeled examples:")
         example_blocks = []
         for ex in labeled_examples:
+            # Truncate example descriptions to keep the prompt cheap — the
+            # format signal lives in the first sentence or two, and the full
+            # blurbs blow through the daily token budget across 20 calls.
             example_blocks.append(
                 f"Title: {ex.get('title', '')}\n"
-                f"Description: {ex.get('description', '')}\n"
+                f"Description: {_shorten(ex.get('description', ''))}\n"
                 f"Label: {ex['label']}"
             )
         parts.append("\n\n---\n\n".join(example_blocks))
